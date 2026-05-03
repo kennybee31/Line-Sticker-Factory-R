@@ -1,8 +1,8 @@
 # ==========================================
-# APP Name: Line Sticker Factory - Pure Vision V6 (Stable Edition)
+# APP Name: Line Sticker Factory - V8 Master Edition
 # Author: EBDS RStudio Expert
-# Philosophy: "大道至簡" (Simplicity is the ultimate sophistication)
-# Governance: ISO 42001 Robustness (Memory-based Rendering & Native Extent)
+# Philosophy: "執大象，天下往" (Hold the core, and all will follow)
+# Governance: ISO 42001 Robustness (Full Pipeline Integration)
 # ==========================================
 
 library(shiny)
@@ -14,28 +14,40 @@ library(zip)
 options(shiny.maxRequestSize = 30 * 1024^2)
 
 ui <- fluidPage(
-  tags$head(tags$style(HTML("
-    .btn-file { background-color: #f8f9fa; border: 1px solid #ced4da; }
-    .well { background-color: #ffffff; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-  "))),
+  # 【前端水管】植入 JavaScript，攔截並直接下載記憶體中的 Base64 數據
+  tags$head(
+    tags$style(HTML("
+      .btn-file { background-color: #f8f9fa; border: 1px solid #ced4da; }
+      .well { background-color: #ffffff; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    ")),
+    tags$script(HTML("
+      Shiny.addCustomMessageHandler('download_zip_js', function(message) {
+          var a = document.createElement('a');
+          a.href = 'data:application/zip;base64,' + message.base64;
+          a.download = message.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+      });
+    "))
+  ),
   
-  titlePanel("Line 貼圖自動化裁切工廠 - 終極穩健版"),
+  titlePanel("Line 貼圖自動化裁切工廠 - 雲端大一統版"),
   
   sidebarLayout(
     sidebarPanel(
       fileInput("main_image", "1. 選擇 AI 生成大圖 (PNG/JPG)", 
                 buttonLabel = "選擇檔案...", placeholder = "尚未選取圖片",
                 accept = c("image/png", "image/jpeg")),
-      
       numericInput("rows", "矩陣行數 (Rows)", value = 4, min = 1),
       numericInput("cols", "矩陣列數 (Cols)", value = 4, min = 1),
       hr(),
-      
       helpText("提示：系統將自動執行一鍵去背、裁切與 10px 留白對齊。"),
       actionButton("process_btn", "開始自動加工", class = "btn-success", style = "width: 100%; height: 50px; font-size: 18px;"),
       br(), br(),
       
-      downloadButton("download_zip", "下載 Line 合規壓縮包", class = "btn-primary", style = "width: 100%;")
+      # 改為一般的 actionButton，觸發前端 JS 下載
+      actionButton("download_zip_btn", "下載 Line 合規壓縮包", icon = icon("download"), class = "btn-primary", style = "width: 100%;")
     ),
     
     mainPanel(
@@ -49,16 +61,18 @@ server <- function(input, output, session) {
   
   processed_images <- reactiveVal(list())
   
+  # ==========================================
+  # 模組 1：影像加工引擎 (之前不小心被您刪除的 V6 核心)
+  # ==========================================
   observeEvent(input$process_btn, {
     req(input$main_image)
     
     withProgress(message = '初始化數據維度...', value = 0, {
-      # 【關鍵 1：數據正規化】強制賦予 Alpha 透明通道
+      # 數據正規化：強制賦予 Alpha 透明通道
       raw_img <- image_read(input$main_image$datapath)
       raw_img <- image_convert(raw_img, format = "png") 
       
       img_info <- image_info(raw_img)
-      
       single_w <- floor(img_info$width / input$cols)
       single_h <- floor(img_info$height / input$rows)
       
@@ -82,10 +96,10 @@ server <- function(input, output, session) {
           # 2. 保守去背 (容差 5%)
           tile_bg_removed <- image_transparent(tile, "white", fuzz = 5)
           
-          # 3. 安全縮放 (保持比例縮放，確保最大邊不超過 350x300)
+          # 3. 安全縮放
           tile_scaled <- image_scale(tile_bg_removed, "350x300") 
           
-          # 【關鍵 2：原生擴充畫布】直接將圖片外擴至 370x320，底色填入絕對透明 "none"
+          # 4. 原生擴充畫布 (直接將圖片外擴至 370x320，確保穩定)
           tile_final <- image_extent(tile_scaled, "370x320", gravity = "center", color = "none")
           
           img_list[[count]] <- tile_final
@@ -93,10 +107,12 @@ server <- function(input, output, session) {
         }
       }
     })
-    
     processed_images(img_list)
   })
   
+  # ==========================================
+  # 模組 2：預覽渲染引擎 (之前不小心被您刪除的記憶體渲染)
+  # ==========================================
   output$preview_grid <- renderUI({
     imgs <- processed_images()
     if(length(imgs) == 0) return(helpText("尚未有處理結果，請點擊 [開始自動加工]"))
@@ -104,7 +120,7 @@ server <- function(input, output, session) {
     fluidRow(
       lapply(1:length(imgs), function(i) {
         tryCatch({
-          # 【關鍵 3：記憶體內流動】完全移除 tempfile，避免防毒軟體或硬碟延遲鎖死檔案
+          # 記憶體內流動，避免寫入硬碟
           raw_bytes <- image_write(imgs[[i]], format = "png")
           base64_str <- base64enc::base64encode(raw_bytes)
           data_uri <- paste0("data:image/png;base64,", base64_str)
@@ -123,14 +139,17 @@ server <- function(input, output, session) {
     )
   })
   
-  output$download_zip <- downloadHandler(
-    filename = function() {
-      paste0("Line_Stickers_Ready_", Sys.Date(), ".zip")
-    },
-    content = function(file) {
-      imgs <- processed_images()
-      req(length(imgs) > 0)
-      
+  # ==========================================
+  # 模組 3：雲端下載引擎 (V7 最新加入的無伺服器下載)
+  # ==========================================
+  observeEvent(input$download_zip_btn, {
+    imgs <- processed_images()
+    if(length(imgs) == 0) {
+      showNotification("請先上傳圖片並點擊【開始自動加工】！", type = "error")
+      return()
+    }
+    
+    withProgress(message = '封裝壓縮包中...', value = 0.5, {
       tmp_dir <- tempdir()
       fs <- c()
       
@@ -146,9 +165,21 @@ server <- function(input, output, session) {
       image_write(image_resize(imgs[[1]], "96x74"), tab_p)
       
       fs <- c(fs, main_p, tab_p)
-      zip::zipr(file, files = fs)
-    }
-  )
+      
+      zip_path <- file.path(tmp_dir, "Line_Stickers.zip")
+      if(file.exists(zip_path)) file.remove(zip_path) 
+      zip::zipr(zip_path, files = fs)
+      
+      # 讀取 ZIP 為二進制原始碼，送給前端 JS
+      raw_zip <- readBin(zip_path, "raw", file.info(zip_path)$size)
+      b64_zip <- base64enc::base64encode(raw_zip)
+      
+      session$sendCustomMessage("download_zip_js", list(
+        base64 = b64_zip,
+        filename = paste0("Line_Stickers_Ready_", Sys.Date(), ".zip")
+      ))
+    })
+  })
 }
 
 shinyApp(ui, server)
